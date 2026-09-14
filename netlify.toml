@@ -1,0 +1,15 @@
+# Configurazione del deploy su Netlify.
+# Con questo file non serve impostare nulla a mano nella UI del progetto.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 6 richiede Node 18+; fissiamo la stessa versione usata in sviluppo
+  # così la build su Netlify non cambia comportamento senza preavviso.
+  NODE_VERSION = "22"
+
+# Nessuna regola di redirect: l'app usa un router su hash (#/dieta, #/settimana…),
+# quindi ogni URL reale sta su "/" e non esistono percorsi da riscrivere.
+# Un catch-all verso index.html romperebbe i path relativi degli asset.
