@@ -10,8 +10,13 @@ domenica successiva, XP e livelli che salgono solo se sei costante.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
+npm run dev        # http://localhost:5173
+npm run dev:host   # stesso server, raggiungibile dal telefono sulla stessa rete
 ```
+
+`dev:host` stampa un indirizzo tipo `http://192.168.1.42:5173`: aprilo dal telefono
+collegato al tuo stesso Wi-Fi e usi l'app da lì, senza pubblicarla da nessuna parte
+(finché il server resta acceso sul computer).
 
 Altri comandi: `npm run build` (build di produzione in `dist/`), `npm run preview`,
 `npm run typecheck`.

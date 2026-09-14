@@ -6,6 +6,7 @@
   "description": "Life RPG — traccia dieta, workout, studio e routine come se fossero le statistiche di un videogioco.",
   "scripts": {
     "dev": "vite",
+    "dev:host": "vite --host",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
