@@ -1,0 +1,67 @@
+/* ==========================================================================
+   Design tokens — tema dark "HUD".
+   I colori delle serie dati vengono dalla palette validata per superficie
+   scura (#161a23): l'ordine Dieta → Workout → Studio → Routine supera i
+   controlli di separazione CVD sulle coppie adiacenti.
+   ========================================================================== */
+:root {
+  color-scheme: dark;
+
+  /* superfici */
+  --bg:          #0b0d12;
+  --bg-elev:     #0f131b;
+  --surface-1:   #161a23;   /* card + superficie dei grafici */
+  --surface-2:   #1c2130;   /* input, righe */
+  --surface-3:   #242b3c;   /* hover */
+  --line:        #262d3c;   /* hairline */
+  --line-soft:   #1e2431;
+
+  /* inchiostro */
+  --ink:         #ffffff;
+  --ink-2:       #aab3c5;
+  --ink-3:       #7c869a;   /* assi, etichette minori */
+
+  /* chrome dei grafici */
+  --grid:        #212836;
+  --axis:        #2f3746;
+
+  /* serie categoriche (una per sezione) */
+  --s-dieta:     #199e70;
+  --s-workout:   #d95926;
+  --s-studio:    #3987e5;
+  --s-routine:   #d55181;
+
+  /* tinte tenui per sfondi/badge delle sezioni */
+  --s-dieta-dim:   rgba(25, 158, 112, 0.16);
+  --s-workout-dim: rgba(217, 89, 38, 0.16);
+  --s-studio-dim:  rgba(57, 135, 229, 0.16);
+  --s-routine-dim: rgba(213, 81, 129, 0.16);
+
+  /* stato (riservati: mai usati come serie) */
+  --good:        #0ca30c;
+  --warning:     #fab219;
+  --serious:     #ec835a;
+  --critical:    #d03b3b;
+
+  /* rampa sequenziale blu per la heatmap (dal quasi-zero al massimo) */
+  --seq-0: #1a2030;
+  --seq-1: #184f95;
+  --seq-2: #256abf;
+  --seq-3: #3987e5;
+  --seq-4: #86b6ef;
+
+  /* forma */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --pad:  16px;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+  --shadow-2: 0 12px 40px rgba(0,0,0,.5);
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --sidebar-w: 232px;
+}
