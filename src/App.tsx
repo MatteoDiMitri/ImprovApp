@@ -1,33 +1,26 @@
+import { useEffect, useState } from 'react'
 import { useRoute, type Route } from './lib/router'
+import { getStorageHealth, onStorageHealth, probeStorage, STORAGE_MESSAGES, type StorageHealth } from './lib/storage'
 import { useStore } from './store/store'
-import { levelInfo, totalXp } from './store/selectors'
-import { today } from './lib/date'
-import { Dashboard } from './pages/Dashboard'
 import { Week } from './pages/Week'
 import { Diet } from './pages/Diet'
 import { Workout } from './pages/Workout'
 import { Study } from './pages/Study'
 import { Routine } from './pages/Routine'
+import { Stats } from './pages/Stats'
 import { Settings } from './pages/Settings'
 
-const NAV: { route: Route; label: string; short: string; icon: string; color?: string }[] = [
-  { route: 'dashboard',  label: 'Panoramica', short: 'Home',  icon: '🎮' },
-  { route: 'settimana',  label: 'Settimana',  short: 'Week',  icon: '🗓️' },
-  { route: 'dieta',      label: 'Dieta',      short: 'Dieta', icon: '🍽️', color: 'var(--s-dieta)' },
-  { route: 'workout',    label: 'Workout',    short: 'Gym',   icon: '🏋️', color: 'var(--s-workout)' },
-  { route: 'studio',     label: 'Studio',     short: 'Studio',icon: '📚', color: 'var(--s-studio)' },
-  { route: 'routine',    label: 'Routine',    short: 'Todo',  icon: '✅', color: 'var(--s-routine)' },
+const SECTION_NAV: { route: Route; label: string; short: string; icon: string }[] = [
+  { route: 'dieta',   label: 'Dieta',   short: 'Dieta',  icon: '🍽️' },
+  { route: 'workout', label: 'Workout', short: 'Gym',    icon: '🏋️' },
+  { route: 'studio',  label: 'Studio',  short: 'Studio', icon: '📚' },
+  { route: 'routine', label: 'Routine', short: 'Todo',   icon: '✅' },
 ]
 
 export function App() {
   const [route, go] = useRoute()
-  const data = useStore(s => s.data)
-
-  const xp = totalXp(data)
-  const lvl = levelInfo(xp.total)
-
-  const openTasks = data.tasks.filter(t => !t.done).length
-  const loggedToday = data.dietLogs[today()]?.adherence != null
+  const openTasks = useStore(s => s.data.tasks.filter(t => !t.done).length)
+  const pomodoroActive = useStore(s => !!s.data.pomodoroSession)
 
   return (
     <div className="app">
@@ -40,18 +33,18 @@ export function App() {
           </div>
         </div>
 
-        <div className="hud" style={{ padding: 12, marginBottom: 12 }}>
-          <div style={{ width: '100%' }}>
-            <div className="row row--tight" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-              <span className="label">Livello {lvl.level}</span>
-              <span className="small muted num">{lvl.intoLevel}/{lvl.levelSpan}</span>
-            </div>
-            <div className="xpbar"><div className="xpbar__fill" style={{ width: `${lvl.progress * 100}%` }} /></div>
-          </div>
-        </div>
+        <button
+          className="navitem navitem--main"
+          aria-current={route === 'settimana' ? 'page' : undefined}
+          onClick={() => go('settimana')}
+        >
+          <span className="navitem__icon">🗓️</span>
+          La settimana
+        </button>
 
+        <div className="sidebar__group">Sezioni</div>
         <nav>
-          {NAV.map(n => (
+          {SECTION_NAV.map(n => (
             <button
               key={n.route}
               className="navitem"
@@ -61,55 +54,81 @@ export function App() {
               <span className="navitem__icon">{n.icon}</span>
               {n.label}
               {n.route === 'routine' && openTasks > 0 && <span className="navitem__badge num">{openTasks}</span>}
-              {n.route === 'dieta' && !loggedToday && <span className="navitem__badge">!</span>}
+              {n.route === 'studio' && pomodoroActive && <span className="navitem__badge">🍅</span>}
             </button>
           ))}
         </nav>
 
         <div className="sidebar__foot">
-          <button
-            className="navitem"
-            aria-current={route === 'impostazioni' ? 'page' : undefined}
-            onClick={() => go('impostazioni')}
-          >
+          <button className="navitem" aria-current={route === 'statistiche' ? 'page' : undefined}
+            onClick={() => go('statistiche')}>
+            <span className="navitem__icon">📈</span>
+            Statistiche
+          </button>
+          <button className="navitem" aria-current={route === 'impostazioni' ? 'page' : undefined}
+            onClick={() => go('impostazioni')}>
             <span className="navitem__icon">⚙️</span>
             Impostazioni
           </button>
         </div>
       </aside>
 
-      <main className="main">
-        {route === 'dashboard' && <Dashboard go={go} />}
-        {route === 'settimana' && <Week />}
+      <main className={`main${route === 'settimana' ? ' main--full' : ''}`}>
+        <StorageWarning />
+        {route === 'settimana' && <Week go={go} />}
         {route === 'dieta' && <Diet />}
         {route === 'workout' && <Workout />}
         {route === 'studio' && <Study />}
         {route === 'routine' && <Routine />}
+        {route === 'statistiche' && <Stats go={go} />}
         {route === 'impostazioni' && <Settings />}
       </main>
 
       <nav className="mobilenav">
-        {NAV.map(n => (
-          <button
-            key={n.route}
-            className="navitem"
-            style={{ flex: 1 }}
-            aria-current={route === n.route ? 'page' : undefined}
-            onClick={() => go(n.route)}
-          >
+        <button className="navitem" style={{ flex: 1 }}
+          aria-current={route === 'settimana' ? 'page' : undefined} onClick={() => go('settimana')}>
+          <span className="navitem__icon">🗓️</span>
+          Week
+        </button>
+        {SECTION_NAV.map(n => (
+          <button key={n.route} className="navitem" style={{ flex: 1 }}
+            aria-current={route === n.route ? 'page' : undefined} onClick={() => go(n.route)}>
             <span className="navitem__icon">{n.icon}</span>
             {n.short}
           </button>
         ))}
-        <button
-          className="navitem" style={{ flex: 1 }}
-          aria-current={route === 'impostazioni' ? 'page' : undefined}
-          onClick={() => go('impostazioni')}
-        >
-          <span className="navitem__icon">⚙️</span>
-          Setup
+        <button className="navitem" style={{ flex: 1 }}
+          aria-current={route === 'statistiche' ? 'page' : undefined} onClick={() => go('statistiche')}>
+          <span className="navitem__icon">📈</span>
+          Stats
         </button>
       </nav>
+    </div>
+  )
+}
+
+/**
+ * Se il browser non conserva i dati bisogna dirlo prima che l'utente ci lavori
+ * sopra un'ora: è l'unico modo di non far sparire il lavoro in silenzio.
+ */
+function StorageWarning() {
+  const [health, setHealth] = useState<StorageHealth>(getStorageHealth)
+  const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    setHealth(probeStorage())
+    return onStorageHealth(setHealth)
+  }, [])
+
+  if (health === 'ok' || dismissed) return null
+
+  return (
+    <div className="notice notice--danger" style={{ marginBottom: 14 }}>
+      <div className="row">
+        <span style={{ fontSize: 16 }}>⚠️</span>
+        <span className="grow">{STORAGE_MESSAGES[health]}</span>
+        <button className="btn btn--sm btn--ghost" onClick={() => setDismissed(true)}>Ho capito</button>
+      </div>
     </div>
   )
 }

@@ -4,9 +4,10 @@ import {
 } from '../lib/date'
 import { nf, sum } from '../lib/format'
 import { uid } from '../lib/id'
+import { mmss, usePomodoro } from '../lib/usePomodoro'
 import { useStore } from '../store/store'
 import type { Course, Lecture } from '../store/types'
-import { recentDays, recentWeeks, streak, studyMinutes, studyMinutesByCourse } from '../store/selectors'
+import { pomodorosOn, recentDays, recentWeeks, streak, studyMinutes, studyMinutesByCourse } from '../store/selectors'
 import { Bar, Card, Empty, Field, Stat } from '../components/ui/ui'
 import { Modal } from '../components/ui/Modal'
 import { BarChart } from '../components/charts/BarChart'
@@ -15,7 +16,6 @@ const ACCENT = 'var(--s-studio)'
 
 export function Study() {
   const data = useStore(s => s.data)
-  const addStudyLog = useStore(s => s.addStudyLog)
   const removeStudyLog = useStore(s => s.removeStudyLog)
   const setStudyGoals = useStore(s => s.setStudyGoals)
   const removeLecture = useStore(s => s.removeLecture)
@@ -23,7 +23,6 @@ export function Study() {
 
   const [editingLecture, setEditingLecture] = useState<Lecture | null>(null)
   const [editingCourse, setEditingCourse] = useState<Course | null>(null)
-  const [form, setForm] = useState({ date: today(), courseId: '', minutes: '60', topic: '' })
 
   const days14 = recentDays(14)
   const weeks = recentWeeks(8)
@@ -33,7 +32,6 @@ export function Study() {
   const minutesWeek = studyMinutes(data, thisWeek)
   const byCourse = studyMinutesByCourse(data, thisWeek)
   const maxCourse = Math.max(1, ...byCourse.map(c => c.minutes))
-
   const lectureHours = sum(data.lectures.map(l => minutesBetweenTimes(l.start, l.end))) / 60
 
   return (
@@ -41,14 +39,15 @@ export function Study() {
       <header className="main__head">
         <div className="grow">
           <h1>📚 Studio</h1>
-          <p className="main__sub">Il calendario delle lezioni e le ore che ci metti davvero, contro gli obiettivi che ti dai.</p>
+          <p className="main__sub">
+            Le ore di studio si contano solo col timer: niente minuti da digitare, niente numeri gonfiati.
+          </p>
         </div>
         <div className="row row--tight">
           <button className="btn" onClick={() => setEditingCourse({ id: uid('c'), name: '' })}>+ Corso</button>
-          <button className="btn btn--accent" style={{ ['--accent' as string]: ACCENT }}
-            onClick={() => setEditingLecture({ id: uid('l'), courseId: data.courses[0]?.id ?? '', weekday: 1, start: '09:00', end: '11:00' })}>
-            + Lezione
-          </button>
+          <button className="btn" onClick={() => setEditingLecture({
+            id: uid('l'), courseId: data.courses[0]?.id ?? '', weekday: 1, start: '09:00', end: '11:00',
+          })}>+ Lezione</button>
         </div>
       </header>
 
@@ -59,22 +58,26 @@ export function Study() {
           <div style={{ marginTop: 8 }}><Bar value={minutesToday / data.studyGoals.dailyMinutes} color={ACCENT} /></div>
         </Card>
         <Card accent={ACCENT}>
+          <Stat label="Pomodori oggi" value={pomodorosOn(data, [today()])} unit="🍅"
+            hint={`${pomodorosOn(data, thisWeek)} questa settimana`} />
+        </Card>
+        <Card accent={ACCENT}>
           <Stat label="Questa settimana" value={formatMinutes(minutesWeek)}
             hint={`obiettivo ${formatMinutes(data.studyGoals.weeklyMinutes)}`} />
           <div style={{ marginTop: 8 }}><Bar value={minutesWeek / data.studyGoals.weeklyMinutes} color={ACCENT} /></div>
         </Card>
         <Card accent={ACCENT}>
           <Stat label="Streak studio" value={streak(data, 'studio')} unit="gg"
-            hint="giorni consecutivi con almeno una sessione" />
-        </Card>
-        <Card accent={ACCENT}>
-          <Stat label="Lezioni a settimana" value={nf.format(Math.round(lectureHours * 10) / 10)} unit="h"
-            hint={`${data.courses.length} corsi · ${data.lectures.length} slot`} />
+            hint={`${data.courses.length} corsi · ${nf.format(Math.round(lectureHours))}h di lezioni`} />
         </Card>
       </div>
 
+      <PomodoroPanel />
+
+      <div style={{ height: 14 }} />
+
       <div className="grid grid--2" style={{ marginBottom: 14 }}>
-        <Card title="Minuti di studio" note="ultimi 14 giorni">
+        <Card title="Minuti di studio" note="ultimi 14 giorni · solo tempo cronometrato">
           <BarChart
             height={230}
             labels={days14.map(d => formatShort(d))}
@@ -82,7 +85,7 @@ export function Study() {
             yFormat={n => `${Math.round(n)}′`}
             reference={{ value: data.studyGoals.dailyMinutes, label: 'obiettivo' }}
             series={[{ key: 'min', label: 'Minuti', color: ACCENT, values: days14.map(d => studyMinutes(data, [d])) }]}
-            emptyHint="Registra la prima sessione qui sotto"
+            emptyHint="Avvia il primo pomodoro qui sopra"
           />
         </Card>
 
@@ -98,7 +101,7 @@ export function Study() {
               values: weeks.map(w => Math.round(studyMinutes(data, weekDays(w)) / 6) / 10),
             }]}
             highlightIndex={weeks.length - 1}
-            emptyHint="Nessuna sessione registrata"
+            emptyHint="Nessuna sessione cronometrata"
           />
         </Card>
       </div>
@@ -106,9 +109,9 @@ export function Study() {
       <Card title="Calendario lezioni" note="si ripete ogni settimana">
         {data.lectures.length === 0 ? (
           <Empty icon="🎓" text="Nessuna lezione inserita. Aggiungi il tuo orario universitario."
-            action={<button className="btn btn--sm"
-              onClick={() => setEditingLecture({ id: uid('l'), courseId: data.courses[0]?.id ?? '', weekday: 1, start: '09:00', end: '11:00' })}>
-              + Aggiungi lezione</button>} />
+            action={<button className="btn btn--sm" onClick={() => setEditingLecture({
+              id: uid('l'), courseId: data.courses[0]?.id ?? '', weekday: 1, start: '09:00', end: '11:00',
+            })}>+ Aggiungi lezione</button>} />
         ) : (
           <div className="week">
             {DAY_NAMES.map((name, i) => {
@@ -120,9 +123,9 @@ export function Study() {
                   {list.map(l => (
                     <button key={l.id} className="slot" style={{ ['--accent' as string]: ACCENT }}
                       onClick={() => setEditingLecture(l)}>
-                      <span className="slot__name">
-                        {data.courses.find(c => c.id === l.courseId)?.name ?? 'Corso'}
-                        <br /><span className="small muted">{l.start}–{l.end}{l.room ? ` · ${l.room}` : ''}</span>
+                      <span className="slot__body">
+                        <span className="slot__name">{data.courses.find(c => c.id === l.courseId)?.name ?? 'Corso'}</span>
+                        <span className="slot__sub">{l.start}–{l.end}{l.room ? ` · ${l.room}` : ''}</span>
                       </span>
                     </button>
                   ))}
@@ -136,44 +139,7 @@ export function Study() {
       <div style={{ height: 14 }} />
 
       <div className="grid grid--2" style={{ marginBottom: 14 }}>
-        <Card title="Registra studio" accent={ACCENT}>
-          <form className="stack" onSubmit={e => {
-            e.preventDefault()
-            const m = Number(form.minutes)
-            if (!m || m <= 0) return
-            addStudyLog({
-              id: uid('sl'), date: form.date, minutes: m,
-              courseId: form.courseId || undefined, topic: form.topic || undefined,
-            })
-            setForm(f => ({ ...f, minutes: '60', topic: '' }))
-          }}>
-            <div className="row">
-              <Field label="Data" style={{ width: 150 }}>
-                <input className="input" type="date" value={form.date}
-                  onChange={e => setForm({ ...form, date: e.target.value })} />
-              </Field>
-              <Field label="Corso" style={{ flex: '1 1 150px' }}>
-                <select className="select" value={form.courseId} onChange={e => setForm({ ...form, courseId: e.target.value })}>
-                  <option value="">— nessuno —</option>
-                  {data.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Minuti" style={{ width: 110 }}>
-                <input className="input input--num" type="number" min={5} step={5} value={form.minutes}
-                  onChange={e => setForm({ ...form, minutes: e.target.value })} />
-              </Field>
-            </div>
-            <Field label="Argomento">
-              <input className="input" placeholder="Capitolo 4, esercizi di algebra…" value={form.topic}
-                onChange={e => setForm({ ...form, topic: e.target.value })} />
-            </Field>
-            <div className="row row--end">
-              <button className="btn btn--accent" style={{ ['--accent' as string]: ACCENT }} type="submit">Aggiungi sessione</button>
-            </div>
-          </form>
-
-          <hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: '14px 0' }} />
-
+        <Card title="Obiettivi e corsi" accent={ACCENT}>
           <div className="row">
             <Field label="Obiettivo giornaliero (min)" style={{ flex: 1 }}>
               <input className="input input--num" type="number" min={0} step={15} value={data.studyGoals.dailyMinutes}
@@ -184,24 +150,6 @@ export function Study() {
                 onChange={e => setStudyGoals({ weeklyMinutes: Number(e.target.value) || 0 })} />
             </Field>
           </div>
-        </Card>
-
-        <Card title="Ripartizione per corso" note="questa settimana">
-          {byCourse.length === 0
-            ? <Empty icon="📊" text="Nessuna sessione questa settimana" />
-            : (
-              <div className="stack" style={{ gap: 12 }}>
-                {byCourse.map(c => (
-                  <div key={c.id}>
-                    <div className="row row--tight" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span>{c.name}</span>
-                      <b className="num">{formatMinutes(c.minutes)}</b>
-                    </div>
-                    <Bar value={c.minutes / maxCourse} color={ACCENT} />
-                  </div>
-                ))}
-              </div>
-            )}
 
           <hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: '14px 0' }} />
 
@@ -221,21 +169,43 @@ export function Study() {
             ))}
           </div>
         </Card>
+
+        <Card title="Ripartizione per corso" note="questa settimana">
+          {byCourse.length === 0
+            ? <Empty icon="📊" text="Nessuna sessione questa settimana" />
+            : (
+              <div className="stack" style={{ gap: 12 }}>
+                {byCourse.map(c => (
+                  <div key={c.id}>
+                    <div className="row row--tight" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span>{c.name}</span>
+                      <b className="num">{formatMinutes(c.minutes)}</b>
+                    </div>
+                    <Bar value={c.minutes / maxCourse} color={ACCENT} />
+                  </div>
+                ))}
+              </div>
+            )}
+        </Card>
       </div>
 
-      <Card title="Sessioni recenti" flush>
+      <Card title="Sessioni cronometrate" flush>
         {data.studyLogs.length === 0
-          ? <div style={{ padding: 16 }}><Empty icon="📓" text="Nessuna sessione registrata" /></div>
+          ? <div style={{ padding: 16 }}><Empty icon="⏱️" text="Nessuna sessione. Il tempo si registra solo col timer." /></div>
           : (
             <div style={{ maxHeight: 320, overflow: 'auto' }}>
               <table className="table">
-                <thead><tr><th>Data</th><th>Corso</th><th>Argomento</th><th className="right">Durata</th><th /></tr></thead>
+                <thead><tr><th>Data</th><th>Corso</th><th>Argomento</th><th className="right">🍅</th><th className="right">Durata</th><th /></tr></thead>
                 <tbody>
                   {[...data.studyLogs].reverse().slice(0, 60).map(l => (
                     <tr key={l.id}>
                       <td className="muted">{formatShort(l.date)}</td>
                       <td>{data.courses.find(c => c.id === l.courseId)?.name ?? '—'}</td>
-                      <td className="dim">{l.topic ?? ''}</td>
+                      <td className="dim">
+                        {l.topic ?? ''}
+                        {l.pomodoros === 0 && <span className="badge badge--serious" style={{ marginLeft: 6 }}>interrotto</span>}
+                      </td>
+                      <td className="right num">{l.pomodoros ?? 0}</td>
                       <td className="right"><b>{formatMinutes(l.minutes)}</b></td>
                       <td className="right" style={{ width: 40 }}>
                         <button className="btn btn--ghost btn--sm" onClick={() => removeStudyLog(l.id)}>✕</button>
@@ -254,6 +224,136 @@ export function Study() {
     </>
   )
 }
+
+/* ============================== IL TIMER ================================= */
+
+function PomodoroPanel() {
+  const courses = useStore(s => s.data.courses)
+  const config = useStore(s => s.data.pomodoro)
+  const setConfig = useStore(s => s.setPomodoroConfig)
+  const p = usePomodoro()
+
+  const [courseId, setCourseId] = useState('')
+  const [topic, setTopic] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const isFocus = p.phase === 'focus'
+  const isBreak = p.phase === 'pausa'
+  const ringColor = isFocus ? ACCENT : isBreak ? 'var(--good)' : 'var(--ink-3)'
+
+  const size = 208, thickness = 12
+  const r = (size - thickness) / 2
+  const circumference = 2 * Math.PI * r
+
+  return (
+    <Card accent={ACCENT}>
+      <div className="pomodoro__grid">
+        <div className="pomodoro__ring">
+          <svg width={size} height={size} role="img"
+            aria-label={p.active ? `${p.phase}, ${mmss(p.remainingMs)} rimanenti` : 'Timer fermo'}>
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-2)" strokeWidth={thickness} />
+            <circle
+              cx={size / 2} cy={size / 2} r={r} fill="none" stroke={ringColor} strokeWidth={thickness}
+              strokeLinecap="round" transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              strokeDasharray={`${circumference * (p.active ? 1 - p.progress : 0)} ${circumference}`}
+              style={{ transition: 'stroke-dasharray .25s linear' }}
+            />
+          </svg>
+          <div className="pomodoro__center">
+            <div className="pomodoro__time num">
+              {p.active ? mmss(p.remainingMs) : mmss(config.focusMin * 60_000)}
+            </div>
+            <div className="pomodoro__phase">{isFocus ? 'FOCUS' : isBreak ? 'PAUSA' : 'PRONTO'}</div>
+          </div>
+        </div>
+
+        <div className="pomodoro__side">
+          <div className="row row--tight" style={{ marginBottom: 12 }}>
+            <span className="badge">🍅 {p.round} pomodori completati</span>
+            <span className="badge">{config.focusMin} / {config.breakMin}</span>
+            <div className="spacer" />
+            <button className="btn btn--sm btn--ghost" onClick={() => setSettingsOpen(true)} aria-label="Impostazioni timer">⚙︎</button>
+          </div>
+
+          {!p.active && p.lastResult && (
+            <div className={`notice ${p.lastResult.logged ? '' : 'notice--warn'}`} style={{ marginBottom: 12 }}>
+              {p.lastResult.logged
+                ? `Registrati ${p.lastResult.minutes} minuti${p.lastResult.completed ? ' · pomodoro completato 🍅' : ''}.`
+                : 'Sessione troppo breve: sotto il minuto non viene registrata.'}
+            </div>
+          )}
+
+          {!p.active && (
+            <>
+              <div className="row" style={{ marginBottom: 12 }}>
+                <Field label="Corso" style={{ flex: '1 1 150px' }}>
+                  <select className="select" value={courseId} onChange={e => setCourseId(e.target.value)}>
+                    <option value="">— nessuno —</option>
+                    {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Su cosa lavori" style={{ flex: '2 1 200px' }}>
+                  <input className="input" placeholder="Capitolo 4, esercizi…" value={topic}
+                    onChange={e => setTopic(e.target.value)} />
+                </Field>
+              </div>
+              <button className="btn btn--accent btn--lg" style={{ ['--accent' as string]: ACCENT, width: '100%' }}
+                onClick={() => p.start({ courseId: courseId || undefined, topic: topic || undefined })}>
+                ▶ Avvia {config.focusMin} minuti di focus
+              </button>
+              <p className="small muted" style={{ marginTop: 10 }}>
+                Il timer va avanti anche se chiudi l'app o blocchi il telefono: conta l'orologio, non la scheda aperta.
+              </p>
+            </>
+          )}
+
+          {isFocus && (
+            <>
+              <div className="pomodoro__now">
+                <div className="pomodoro__topic">{topic || 'Sessione di studio'}</div>
+                <div className="small muted">{courses.find(c => c.id === courseId)?.name ?? 'Nessun corso'}</div>
+              </div>
+              <button className="btn btn--danger" style={{ width: '100%' }} onClick={p.stop}>
+                ■ Ferma e registra i minuti fatti
+              </button>
+            </>
+          )}
+
+          {isBreak && (
+            <>
+              <div className="pomodoro__now">
+                <div className="pomodoro__topic">Pausa 🌿</div>
+                <div className="small muted">Alzati, bevi, guarda lontano. Il prossimo focus lo lanci tu.</div>
+              </div>
+              <button className="btn" style={{ width: '100%' }} onClick={p.skipBreak}>Salta la pausa</button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <Modal open={settingsOpen} title="Impostazioni del timer" onClose={() => setSettingsOpen(false)}
+        footer={<button className="btn btn--primary" onClick={() => setSettingsOpen(false)}>Fatto</button>}>
+        <div className="row">
+          <Field label="Focus (minuti)" style={{ flex: 1 }}>
+            <input className="input input--num" type="number" min={5} max={120} value={config.focusMin}
+              onChange={e => setConfig({ focusMin: Number(e.target.value) || 50 })} />
+          </Field>
+          <Field label="Pausa (minuti)" style={{ flex: 1 }}>
+            <input className="input input--num" type="number" min={1} max={60} value={config.breakMin}
+              onChange={e => setConfig({ breakMin: Number(e.target.value) || 10 })} />
+          </Field>
+        </div>
+        <p className="small muted">
+          Il tempo viene misurato sull'orologio di sistema, quindi una sessione sopravvive a un refresh
+          e non si falsa sospendendo la scheda. I minuti entrano nello storico solo da qui:
+          non c'è nessun campo per scriverli a mano.
+        </p>
+      </Modal>
+    </Card>
+  )
+}
+
+/* ============================ CORSI E LEZIONI ============================= */
 
 function LectureEditor({ lecture, onClose, onDelete }: { lecture: Lecture; onClose: () => void; onDelete: () => void }) {
   const courses = useStore(s => s.data.courses)

@@ -1,7 +1,7 @@
 import { addDays, today, weekDays, weekStart, type ISODate } from '../lib/date'
 import { uid } from '../lib/id'
 import { emptyData } from './store'
-import type { AppData, Adherence, DayPlan, DietPlan, SplitDay, Task } from './types'
+import type { AppData, Adherence, DayPlan, DietDay, Meal, SplitDay, Task } from './types'
 
 /** PRNG deterministico: lo stesso set di esempio a ogni caricamento. */
 function rng(seed: number) {
@@ -31,13 +31,18 @@ export function demoData(): AppData {
   d.studyGoals = { dailyMinutes: 120, weeklyMinutes: 720 }
 
   /* ------------------------------- dieta ------------------------------- */
-  const mk = (name: string, meals: [string, string, [string, string, number][]][]): DietPlan => ({
-    id: uid('dp'),
-    name,
-    meals: meals.map(([mname, time, items]) => ({
+  const mk = (name: string, meals: [string, string, [string, string, number][]][]): DietDay => ({
+    note: name,
+    meals: meals.map(([mname, time, items]): Meal => ({
       id: uid('m'), name: mname, time,
       items: items.map(([n, q, k]) => ({ id: uid('f'), name: n, qty: q, kcal: k })),
     })),
+  })
+
+  /** ogni giorno ha pasti propri: copiarli condividerebbe gli id */
+  const clone = (d: DietDay): DietDay => ({
+    note: d.note,
+    meals: d.meals.map(m => ({ ...m, id: uid('m'), items: m.items.map(i => ({ ...i, id: uid('f') })) })),
   })
 
   const standard = mk('Giorno standard', [
@@ -57,7 +62,16 @@ export function demoData(): AppData {
     ['Pranzo', '13:00', [['Insalata di ceci', '250 g', 380], ['Tonno', '120 g', 150]]],
     ['Cena', '20:00', [['Vellutata di verdure', '300 g', 160], ['Petto di tacchino', '180 g', 240], ['Olio evo', '10 g', 90]]],
   ])
-  d.dietPlans = [standard, allenamento, scarico]
+  // giorni di allenamento (lun, mar, gio, sab) più carichi; domenica di scarico
+  d.dietWeek = {
+    1: allenamento,
+    2: clone(allenamento),
+    3: standard,
+    4: clone(allenamento),
+    5: clone(standard),
+    6: clone(allenamento),
+    7: scarico,
+  }
 
   /* ------------------------------ workout ------------------------------ */
   const split = (name: string, focus: string, kcal: number, durationMin: number, ex: [string, number, string, number][]): SplitDay => ({
@@ -112,7 +126,6 @@ export function demoData(): AppData {
       const wd = i + 1
       const sd = workoutByWeekday[wd]
       const plan: DayPlan = {
-        dietPlanId: sd ? allenamento.id : wd === 7 ? scarico.id : standard.id,
         workoutDayId: sd ? sd.id : 'riposo',
         studyTargetMin: wd === 7 ? 60 : wd === 6 ? 90 : 120,
         studyBlocks: wd <= 5
@@ -153,10 +166,14 @@ export function demoData(): AppData {
       const target = plan.studyTargetMin ?? 0
       const done = Math.round((target * (0.4 + r() * 0.95)) / 15) * 15
       if (done > 0) {
+        // lo storico è fatto di sessioni cronometrate: i pomodori sono blocchi da 50'
+        const pomodori = Math.floor(done / 50)
         d.studyLogs.push({
           id: uid('sl'), date, minutes: done, courseId: courses[Math.floor(r() * 3)].id,
           topic: pick(r, ['Esercizi', 'Teoria', 'Ripasso', 'Laboratorio', 'Vecchi esami']),
+          pomodoros: pomodori, source: 'pomodoro',
         })
+        d.pomodoroRound += pomodori
       }
     }
 

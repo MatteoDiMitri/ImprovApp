@@ -1,20 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   DAY_NAMES, addDays, dayNum, formatDay, formatMinutes, formatWeekRange,
   isoWeekNumber, minutesBetweenTimes, today, weekDays, weekStart, weekday, type ISODate,
 } from '../lib/date'
-import { sum } from '../lib/format'
+import { nf, sum } from '../lib/format'
+import { uid } from '../lib/id'
+import type { Route } from '../lib/router'
 import { useStore } from '../store/store'
 import { ADHERENCE, SECTIONS, type Adherence, type DayPlan, type StudyBlock } from '../store/types'
-import { dietPlanById, planKcal, weekProgress } from '../store/selectors'
-import { uid } from '../lib/id'
-import { Card, Empty, Field } from '../components/ui/ui'
+import {
+  dayKcal, dietForDate, levelInfo, streak, studyMinutes, totalXp, weekProgress, xpForDay,
+} from '../store/selectors'
+import { Bar, Card, Empty, Field } from '../components/ui/ui'
 import { Modal } from '../components/ui/Modal'
-import { RadialGauge } from '../components/charts/RadialGauge'
 
-const color = (id: string) => SECTIONS.find(s => s.id === id)!.color
 
-export function Week() {
+export function Week({ go }: { go: (r: Route) => void }) {
   const data = useStore(s => s.data)
   const copyWeek = useStore(s => s.copyWeek)
   const clearWeek = useStore(s => s.clearWeek)
@@ -23,19 +24,22 @@ export function Week() {
 
   const [monday, setMonday] = useState<ISODate>(() => weekStart(today()))
   const [editing, setEditing] = useState<ISODate | null>(null)
+  const [noteOpen, setNoteOpen] = useState(false)
 
   const days = weekDays(monday)
   const plan = data.weekPlans[monday]
   const progress = weekProgress(data, monday)
   const isCurrent = monday === weekStart(today())
 
+  const xp = totalXp(data)
+  const lvl = levelInfo(xp.total)
+
   // La domenica sera si pianifica la settimana che arriva: lo ricordiamo qui.
   const nextMonday = addDays(weekStart(today()), 7)
-  const nextEmpty = !data.weekPlans[nextMonday]
-    || weekDays(nextMonday).every(d => {
-      const p = data.weekPlans[nextMonday]?.days[d]
-      return !p?.dietPlanId && !p?.workoutDayId && !p?.studyBlocks.length && !p?.studyTargetMin
-    })
+  const nextEmpty = weekDays(nextMonday).every(d => {
+    const p = data.weekPlans[nextMonday]?.days[d]
+    return !p?.workoutDayId && !p?.studyBlocks.length && !p?.studyTargetMin
+  })
   const showSundayNudge = weekday(today()) === 7 && nextEmpty && monday !== nextMonday
 
   return (
@@ -54,6 +58,9 @@ export function Week() {
           <button className="btn btn--sm" onClick={() => setMonday(weekStart(today()))}>Oggi</button>
           <button className="btn btn--sm" onClick={() => setMonday(addDays(monday, 7))} aria-label="Settimana successiva">→</button>
           <button className="btn btn--sm" onClick={() => copyWeek(addDays(monday, -7), monday)}>Copia precedente</button>
+          <button className="btn btn--sm" onClick={() => setNoteOpen(true)}>
+            📝 Note{plan?.note ? ' •' : ''}
+          </button>
           <button className="btn btn--sm btn--primary" onClick={() => markWeekPlanned(monday)}>Piano pronto</button>
         </div>
       </header>
@@ -71,44 +78,65 @@ export function Week() {
         </Card>
       )}
 
-      <div className="grid grid--aside" style={{ margin: '14px 0' }}>
-        <Card title="Avanzamento settimana">
-          <div className="row" style={{ justifyContent: 'space-around', gap: 6 }}>
-            {progress.map(p => (
-              <RadialGauge
-                key={p.id}
-                value={p.progress}
-                size={74}
-                thickness={7}
-                color={color(p.id)}
-                label={SECTIONS.find(s => s.id === p.id)!.label}
-              />
-            ))}
+      {/* --------------------------- striscia HUD --------------------------- */}
+      <div className="hud hud--slim">
+        <div className="hud__level">
+          <div><b className="num">{lvl.level}</b><span>LIVELLO</span></div>
+        </div>
+        <div className="hud__main">
+          <div className="row row--tight" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+            <span className="label">Esperienza</span>
+            <span className="small muted num">{nf.format(lvl.intoLevel)} / {nf.format(lvl.levelSpan)} XP</span>
           </div>
-        </Card>
-
-        <Card title="Note della settimana" note="l'intenzione che ti sei dato la domenica">
-          <textarea
-            className="textarea"
-            placeholder="Es. settimana di scarico, tre sessioni di gambe, chiudere il capitolo 4 di Analisi…"
-            value={plan?.note ?? ''}
-            onChange={e => setWeekNote(monday, e.target.value)}
-          />
-          <div className="row row--end" style={{ marginTop: 10 }}>
-            <button className="btn btn--sm btn--danger" onClick={() => {
-              if (confirm('Svuotare tutta la pianificazione di questa settimana?')) clearWeek(monday)
-            }}>Svuota settimana</button>
-          </div>
-        </Card>
+          <div className="xpbar"><div className="xpbar__fill" style={{ width: `${lvl.progress * 100}%` }} /></div>
+        </div>
+        <div className="hud__sections">
+          {progress.map(p => {
+            const s = SECTIONS.find(x => x.id === p.id)!
+            return (
+              <button key={p.id} className="hudsection" onClick={() => go(p.id as Route)}
+                style={{ ['--accent' as string]: s.color }} title={p.detail}>
+                <span className="hudsection__top">
+                  <span>{s.icon}</span>
+                  <b className="num">{Math.round(p.progress * 100)}%</b>
+                </span>
+                <Bar value={p.progress} color={s.color} />
+                <span className="hudsection__label">{s.label}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="hud__streak">
+          <span className="streak">🔥 {streak(data)}</span>
+          <span className="label">streak</span>
+        </div>
       </div>
 
-      <div className="week">
+      {/* ---------------------------- i sette giorni ------------------------ */}
+      <div className="week week--main">
         {days.map((date, i) => (
           <DayCard key={date} date={date} name={DAY_NAMES[i]} onEdit={() => setEditing(date)} />
         ))}
       </div>
 
       {editing && <DayEditor date={editing} onClose={() => setEditing(null)} />}
+
+      <Modal open={noteOpen} title={`Note della settimana ${isoWeekNumber(monday)}`} onClose={() => setNoteOpen(false)}
+        footer={
+          <>
+            <button className="btn btn--ghost btn--danger" onClick={() => {
+              if (confirm('Svuotare tutta la pianificazione di questa settimana?')) { clearWeek(monday); setNoteOpen(false) }
+            }}>Svuota settimana</button>
+            <div className="spacer" />
+            <button className="btn btn--primary" onClick={() => setNoteOpen(false)}>Fatto</button>
+          </>
+        }>
+        <Field label="L'intenzione che ti sei dato">
+          <textarea className="textarea" autoFocus
+            placeholder="Es. settimana di scarico, tre sessioni di gambe, chiudere il capitolo 4 di Analisi…"
+            value={plan?.note ?? ''} onChange={e => setWeekNote(monday, e.target.value)} />
+        </Field>
+      </Modal>
     </>
   )
 }
@@ -120,19 +148,21 @@ function DayCard({ date, name, onEdit }: { date: ISODate; name: string; onEdit: 
   const toggleTask = useStore(s => s.toggleTask)
   const plan: DayPlan = data.weekPlans[weekStart(date)]?.days[date] ?? { studyBlocks: [] }
 
-  const dietPlan = dietPlanById(data, plan.dietPlanId)
+  const diet = dietForDate(data, date)
   const split = data.splitDays.find(s => s.id === plan.workoutDayId)
   const isRest = plan.workoutDayId === 'riposo'
   const lectures = data.lectures
     .filter(l => l.weekday === weekday(date))
     .sort((a, b) => a.start.localeCompare(b.start))
   const workoutDone = data.workoutLogs.some(l => l.date === date)
-  const studied = sum(data.studyLogs.filter(l => l.date === date).map(l => l.minutes))
+  const studied = studyMinutes(data, [date])
   const target = plan.studyTargetMin ?? sum(plan.studyBlocks.map(b => minutesBetweenTimes(b.start, b.end)))
   const tasks = data.tasks.filter(t => t.date === date)
   const adherence = data.dietLogs[date]?.adherence
 
   const isToday = date === today()
+  const xp = xpForDay(data, date)
+  const dayXp = xp.dieta + xp.workout + xp.studio + xp.routine
 
   return (
     <article className={`day${isToday ? ' day--today' : ''}${date < today() ? ' day--past' : ''}`}>
@@ -142,74 +172,81 @@ function DayCard({ date, name, onEdit }: { date: ISODate; name: string; onEdit: 
         <span className="day__num">{dayNum(date)}</span>
       </div>
 
-      {lectures.length > 0 && (
-        <div className="day__slot">
-          {lectures.map(l => (
-            <div key={l.id} className="slot" style={{ ['--accent' as string]: 'var(--s-studio)', cursor: 'default' }}>
-              <span className="slot__name">{data.courses.find(c => c.id === l.courseId)?.name ?? 'Lezione'}</span>
-              <span className="slot__meta">{l.start}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="day__body">
+        {lectures.length > 0 && (
+          <div className="day__slot">
+            {lectures.map(l => (
+              <div key={l.id} className="slot" style={{ ['--accent' as string]: 'var(--s-studio)', cursor: 'default' }}>
+                <span className="slot__body">
+                  <span className="slot__name">{data.courses.find(c => c.id === l.courseId)?.name ?? 'Lezione'}</span>
+                  <span className="slot__sub">🎓 {l.start}–{l.end}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      <div className="day__slot">
-        <button className={`slot${dietPlan ? '' : ' slot--empty'}`} title={dietPlan?.name}
-          style={{ ['--accent' as string]: 'var(--s-dieta)' }} onClick={onEdit}>
-          <span>🍽️</span>
-          <span className="slot__body">
-            <span className="slot__name">{dietPlan?.name ?? 'Nessun piano'}</span>
-            {dietPlan && <span className="slot__sub num">{planKcal(dietPlan)} kcal</span>}
-          </span>
-        </button>
-        {adherence && (
-          <span className={`badge badge--${ADHERENCE[adherence].tone}`} style={{ alignSelf: 'flex-start' }}>
-            <span className="badge__dot" />{ADHERENCE[adherence].label}
-          </span>
+        {/* la dieta arriva dalla dieta settimanale: qui non si assegna niente */}
+        <div className="day__slot">
+          <button className={`slot${diet ? '' : ' slot--empty'}`}
+            style={{ ['--accent' as string]: 'var(--s-dieta)' }} onClick={onEdit}
+            title={diet?.meals.map(m => m.name).join(' · ')}>
+            <span>🍽️</span>
+            <span className="slot__body">
+              <span className="slot__name">{diet ? `${diet.meals.length} pasti` : 'Dieta non compilata'}</span>
+              {diet && <span className="slot__sub num">{nf.format(dayKcal(diet))} kcal</span>}
+            </span>
+          </button>
+          {adherence && (
+            <span className={`badge badge--${ADHERENCE[adherence].tone}`} style={{ alignSelf: 'flex-start' }}>
+              <span className="badge__dot" />{ADHERENCE[adherence].label}
+            </span>
+          )}
+        </div>
+
+        <div className="day__slot">
+          <button className={`slot${split || isRest ? '' : ' slot--empty'}`} title={split?.focus}
+            style={{ ['--accent' as string]: isRest ? 'var(--line)' : 'var(--s-workout)' }} onClick={onEdit}>
+            <span>{isRest ? '😴' : '🏋️'}</span>
+            <span className="slot__body">
+              <span className="slot__name">{isRest ? 'Riposo' : split?.name ?? 'Nessun workout'}</span>
+              {split && <span className="slot__sub num">{split.kcal} kcal · {split.durationMin}′</span>}
+            </span>
+            {split && workoutDone && <span className="slot__check">✅</span>}
+          </button>
+        </div>
+
+        <div className="day__slot">
+          <button className={`slot${target ? '' : ' slot--empty'}`}
+            style={{ ['--accent' as string]: 'var(--s-studio)' }} onClick={onEdit}>
+            <span>📚</span>
+            <span className="slot__body">
+              <span className="slot__name">{target ? `Studio ${formatMinutes(target)}` : 'Nessun obiettivo'}</span>
+              {target > 0 && date <= today() && (
+                <span className="slot__sub num">{formatMinutes(studied)} fatti · {Math.round((studied / target) * 100)}%</span>
+              )}
+            </span>
+          </button>
+        </div>
+
+        {tasks.length > 0 && (
+          <div className="day__slot">
+            {tasks.map(t => (
+              <button key={t.id} className="slot" style={{ ['--accent' as string]: 'var(--s-routine)' }}
+                onClick={() => toggleTask(t.id)}>
+                <span>{t.done ? '☑' : '☐'}</span>
+                <span className={`slot__name${t.done ? ' strike' : ''}`}>{t.title}</span>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
-      <div className="day__slot">
-        <button className={`slot${split || isRest ? '' : ' slot--empty'}`} title={split?.focus}
-          style={{ ['--accent' as string]: isRest ? 'var(--line)' : 'var(--s-workout)' }} onClick={onEdit}>
-          <span>{isRest ? '😴' : '🏋️'}</span>
-          <span className="slot__body">
-            <span className="slot__name">{isRest ? 'Riposo' : split?.name ?? 'Nessun workout'}</span>
-            {split && <span className="slot__sub num">{split.kcal} kcal · {split.durationMin}′</span>}
-          </span>
-          {split && workoutDone && <span className="slot__check">✅</span>}
-        </button>
+      <div className="day__foot">
+        {dayXp > 0 && <span className="small muted num nowrap">+{dayXp} XP</span>}
+        <div className="spacer" />
+        <button className="btn btn--ghost btn--sm nowrap" onClick={onEdit}>Pianifica</button>
       </div>
-
-      <div className="day__slot">
-        <button className={`slot${target ? '' : ' slot--empty'}`}
-          style={{ ['--accent' as string]: 'var(--s-studio)' }} onClick={onEdit}>
-          <span>📚</span>
-          <span className="slot__body">
-            <span className="slot__name">{target ? `Studio ${formatMinutes(target)}` : 'Nessun obiettivo'}</span>
-            {/* la percentuale ha senso solo su un giorno già vissuto */}
-            {target > 0 && date <= today() && (
-              <span className="slot__sub num">{formatMinutes(studied)} fatti · {Math.round((studied / target) * 100)}%</span>
-            )}
-          </span>
-        </button>
-      </div>
-
-      {tasks.length > 0 && (
-        <div className="day__slot">
-          {tasks.map(t => (
-            <button key={t.id} className="slot" style={{ ['--accent' as string]: 'var(--s-routine)' }}
-              onClick={() => toggleTask(t.id)}>
-              <span>{t.done ? '☑' : '☐'}</span>
-              <span className={`slot__name${t.done ? ' strike' : ''}`}>{t.title}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <button className="btn btn--ghost btn--sm" style={{ marginTop: 'auto' }} onClick={onEdit}>
-        ✎ Pianifica
-      </button>
     </article>
   )
 }
@@ -228,12 +265,7 @@ function DayEditor({ date, onClose }: { date: ISODate; onClose: () => void }) {
   const [newTask, setNewTask] = useState('')
   const tasks = data.tasks.filter(t => t.date === date)
   const adherence = data.dietLogs[date]?.adherence
-  const dietPlan = dietPlanById(data, plan.dietPlanId)
-
-  const blocksMinutes = useMemo(
-    () => sum(plan.studyBlocks.map(b => minutesBetweenTimes(b.start, b.end))),
-    [plan.studyBlocks],
-  )
+  const diet = dietForDate(data, date)
 
   function addBlock() {
     const b: StudyBlock = { id: uid('sb'), label: 'Studio', start: '18:00', end: '20:00' }
@@ -248,31 +280,44 @@ function DayEditor({ date, onClose }: { date: ISODate; onClose: () => void }) {
     <Modal open title={formatDay(date)} onClose={onClose} wide
       footer={<button className="btn btn--primary" onClick={onClose}>Fatto</button>}>
 
-      <Field label="🍽️ Piano alimentare">
-        <select className="select" value={plan.dietPlanId ?? ''}
-          onChange={e => setDayPlan(date, { dietPlanId: e.target.value || undefined })}>
-          <option value="">— nessun piano —</option>
-          {data.dietPlans.map(p => (
-            <option key={p.id} value={p.id}>{p.name} · {planKcal(p)} kcal</option>
-          ))}
-        </select>
-      </Field>
-      {data.dietPlans.length === 0 && (
-        <p className="small muted">Crea prima un piano nella sezione Dieta.</p>
-      )}
-      {dietPlan && (
-        <div>
-          <span className="field__label">Com'è andata</span>
-          <div className="chipbar" style={{ marginTop: 5 }}>
-            {(Object.keys(ADHERENCE) as Adherence[]).map(a => (
-              <button key={a} className="chip" aria-pressed={adherence === a}
-                onClick={() => setDietLog(date, { adherence: adherence === a ? undefined : a })}>
-                {ADHERENCE[a].icon} {ADHERENCE[a].label}
-              </button>
-            ))}
+      {/* --- dieta: in sola lettura, arriva dalla dieta settimanale --- */}
+      <div>
+        <span className="field__label">🍽️ Dieta del giorno</span>
+        {diet ? (
+          <div className="card" style={{ background: 'var(--surface-2)', padding: 12, marginTop: 6 }}>
+            <div className="row row--tight" style={{ marginBottom: 8 }}>
+              <span className="small dim">Dalla tua dieta settimanale</span>
+              <div className="spacer" />
+              <span className="badge num">{nf.format(dayKcal(diet))} kcal</span>
+            </div>
+            <table className="table" style={{ fontSize: 12.5 }}>
+              <tbody>
+                {diet.meals.map(m => (
+                  <tr key={m.id}>
+                    <td style={{ padding: '4px 0' }}><b>{m.name}</b>{m.time ? <span className="muted"> · {m.time}</span> : null}</td>
+                    <td className="dim" style={{ padding: '4px 0' }}>{m.items.map(i => i.name).filter(Boolean).join(', ') || '—'}</td>
+                    <td className="right nowrap" style={{ padding: '4px 0' }}>{nf.format(sum(m.items.map(i => i.kcal)))} kcal</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+        ) : (
+          <p className="small muted" style={{ marginTop: 6 }}>
+            Questo giorno non ha ancora pasti. Compilalo nella sezione Dieta: comparirà qui in automatico.
+          </p>
+        )}
+
+        <span className="field__label" style={{ display: 'block', marginTop: 12 }}>Com'è andata</span>
+        <div className="chipbar" style={{ marginTop: 5 }}>
+          {(Object.keys(ADHERENCE) as Adherence[]).map(a => (
+            <button key={a} className="chip" aria-pressed={adherence === a}
+              onClick={() => setDietLog(date, { adherence: adherence === a ? undefined : a })}>
+              {ADHERENCE[a].icon} {ADHERENCE[a].label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       <hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: 0 }} />
 
@@ -295,7 +340,7 @@ function DayEditor({ date, onClose }: { date: ISODate; onClose: () => void }) {
       <div className="row" style={{ alignItems: 'flex-end' }}>
         <Field label="📚 Obiettivo di studio (minuti)" style={{ width: 200 }}>
           <input className="input input--num" type="number" min={0} step={15}
-            value={plan.studyTargetMin ?? ''} placeholder={String(blocksMinutes || 0)}
+            value={plan.studyTargetMin ?? ''} placeholder="0"
             onChange={e => setDayPlan(date, { studyTargetMin: e.target.value ? Number(e.target.value) : undefined })} />
         </Field>
         <div className="spacer" />

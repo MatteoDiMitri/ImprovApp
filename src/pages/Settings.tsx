@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { nf } from '../lib/format'
-import { DATA_VERSION, useStore } from '../store/store'
+import { migrateExport, useStore } from '../store/store'
 import { demoData } from '../store/seed'
 import type { AppData } from '../store/types'
 import { activeDates, totalXp, XP } from '../store/selectors'
@@ -33,9 +33,13 @@ export function Settings() {
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result)) as AppData
-        if (typeof parsed !== 'object' || !parsed || !('dietPlans' in parsed)) throw new Error('formato')
-        replaceAll({ ...parsed, version: DATA_VERSION })
+        const parsed = JSON.parse(String(reader.result)) as AppData & { dietPlans?: unknown[] }
+        const looksRight = typeof parsed === 'object' && parsed !== null
+          && ('dietWeek' in parsed || 'dietPlans' in parsed || 'dietLogs' in parsed)
+        if (!looksRight) throw new Error('formato')
+        // un export della versione 1 passa dalla stessa migrazione dei dati salvati
+        const migrated = migrateExport(parsed)
+        replaceAll(migrated)
         setMessage('Dati importati.')
       } catch {
         setMessage('File non valido: deve essere un export di ImprovApp.')
@@ -112,7 +116,7 @@ export function Settings() {
           <Stat label="Workout" value={XP.workoutBase} unit="XP"
             hint="a sessione, +1 XP ogni 25 kcal bruciate" />
           <Stat label="Studio" value="1" unit="XP / 4 min"
-            hint={`+${XP.studioObiettivo} XP quando centri l'obiettivo del giorno`} />
+            hint={`solo tempo cronometrato col pomodoro · +${XP.studioObiettivo} XP se centri l'obiettivo`} />
           <Stat label="Routine" value={`${XP.taskBassa}–${XP.taskAlta}`} unit="XP"
             hint="per task, in base alla priorità" />
         </div>

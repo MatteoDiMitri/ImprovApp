@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { formatShort, today, type ISODate } from '../lib/date'
-import { avg, nf, nf1, sum } from '../lib/format'
+import { DAY_NAMES, DAY_NAMES_LONG, formatShort, today, weekday, type ISODate } from '../lib/date'
+import { nf, nf1, sum } from '../lib/format'
 import { uid } from '../lib/id'
 import { useStore } from '../store/store'
-import { ADHERENCE, type Adherence, type DietPlan, type Meal } from '../store/types'
-import { adherenceScore, kcalForDay, planKcal, recentDays, weightTrend } from '../store/selectors'
+import { ADHERENCE, type Adherence, type Meal } from '../store/types'
+import { adherenceScore, dayKcal, kcalForDay, recentDays, weeklyDietKcal, weightTrend } from '../store/selectors'
 import { Card, Empty, Field, Stat } from '../components/ui/ui'
-import { Modal } from '../components/ui/Modal'
 import { LineChart } from '../components/charts/LineChart'
 import { BarChart } from '../components/charts/BarChart'
 import { compact } from '../components/charts/chart-utils'
@@ -17,9 +16,9 @@ export function Diet() {
   const data = useStore(s => s.data)
   const setDietLog = useStore(s => s.setDietLog)
   const setWeight = useStore(s => s.setWeight)
-  const removeDietPlan = useStore(s => s.removeDietPlan)
+  const removeWeight = useStore(s => s.removeWeight)
 
-  const [editing, setEditing] = useState<DietPlan | null>(null)
+  const [day, setDay] = useState<number>(() => weekday(today()))
   const [weightInput, setWeightInput] = useState('')
   const [weightDate, setWeightDate] = useState<ISODate>(today())
 
@@ -32,7 +31,7 @@ export function Diet() {
   const days14 = recentDays(14)
   const adh30 = adherenceScore(data, days30)
   const kcal14 = days14.map(d => kcalForDay(data, d))
-  const kcalAvg = avg(kcal14.filter((k): k is number => k != null))
+  const budget = weeklyDietKcal(data)
 
   const todayLog = data.dietLogs[today()]
 
@@ -41,10 +40,10 @@ export function Diet() {
       <header className="main__head">
         <div className="grow">
           <h1>🍽️ Dieta</h1>
-          <p className="main__sub">Il piano che ti sei dato, il peso giorno per giorno e quanto lo stai rispettando.</p>
+          <p className="main__sub">
+            Scrivi qui la tua dieta settimanale: finisce da sola nei giorni della Settimana, senza doverla assegnare.
+          </p>
         </div>
-        <button className="btn btn--accent" style={{ ['--accent' as string]: ACCENT }}
-          onClick={() => setEditing(newPlan())}>+ Nuovo piano</button>
       </header>
 
       <div className="grid grid--4" style={{ marginBottom: 14 }}>
@@ -67,10 +66,15 @@ export function Diet() {
             hint={`${days30.filter(d => data.dietLogs[d]?.adherence).length} giorni registrati`} />
         </Card>
         <Card accent={ACCENT}>
-          <Stat label="Kcal medie 14 gg" value={kcalAvg ? nf.format(Math.round(kcalAvg)) : '—'}
-            hint={`obiettivo ${nf.format(data.settings.kcalTarget)} kcal`} />
+          <Stat label="Media della dieta" value={budget.perDay ? nf.format(Math.round(budget.perDay)) : '—'}
+            unit={budget.perDay ? 'kcal' : undefined}
+            hint={budget.daysSet ? `${budget.daysSet} giorni su 7 compilati` : 'nessun giorno compilato'} />
         </Card>
       </div>
+
+      <WeekDietEditor day={day} onDay={setDay} />
+
+      <div style={{ height: 14 }} />
 
       <div className="grid grid--2" style={{ marginBottom: 14 }}>
         <Card title="Andamento del peso" note="punti = pesate, tratteggio = media mobile 7 giorni">
@@ -96,14 +100,14 @@ export function Diet() {
             yFormat={compact}
             reference={{ value: data.settings.kcalTarget, label: 'obiettivo' }}
             series={[{ key: 'kcal', label: 'Kcal', color: ACCENT, values: kcal14.map(k => k ?? 0) }]}
-            emptyHint="Assegna un piano ai giorni nella Settimana"
+            emptyHint="Compila la dieta settimanale qui sopra"
           />
         </Card>
       </div>
 
-      <div className="grid grid--2" style={{ marginBottom: 14 }}>
+      <div className="grid grid--2">
         <Card title="Oggi" accent={ACCENT}>
-          <span className="field__label">Sto seguendo il piano?</span>
+          <span className="field__label">Sto seguendo la dieta?</span>
           <div className="chipbar" style={{ margin: '6px 0 14px' }}>
             {(Object.keys(ADHERENCE) as Adherence[]).map(a => (
               <button key={a} className="chip" aria-pressed={todayLog?.adherence === a}
@@ -113,14 +117,12 @@ export function Diet() {
             ))}
           </div>
 
-          <div className="row" style={{ alignItems: 'flex-end' }}>
-            <Field label="Kcal effettive (se diverse dal piano)" style={{ flex: '1 1 180px' }}>
-              <input className="input input--num" type="number" min={0} step={50}
-                placeholder={String(kcalForDay(data, today()) ?? '')}
-                value={todayLog?.kcalActual ?? ''}
-                onChange={e => setDietLog(today(), { kcalActual: e.target.value ? Number(e.target.value) : undefined })} />
-            </Field>
-          </div>
+          <Field label="Kcal effettive (solo se hai mangiato diverso dalla dieta)">
+            <input className="input input--num" type="number" min={0} step={50}
+              placeholder={String(kcalForDay(data, today()) ?? '')}
+              value={todayLog?.kcalActual ?? ''}
+              onChange={e => setDietLog(today(), { kcalActual: e.target.value ? Number(e.target.value) : undefined })} />
+          </Field>
 
           <Field label="Nota" style={{ marginTop: 10 }}>
             <input className="input" placeholder="Cena fuori, pranzo saltato…"
@@ -156,7 +158,7 @@ export function Diet() {
                         <td className="right"><b>{nf1.format(w.kg)} kg</b></td>
                         <td className="right" style={{ width: 34 }}>
                           <button className="btn btn--ghost btn--sm" aria-label="Elimina"
-                            onClick={() => useStore.getState().removeWeight(w.date)}>✕</button>
+                            onClick={() => removeWeight(w.date)}>✕</button>
                         </td>
                       </tr>
                     ))}
@@ -166,130 +168,151 @@ export function Diet() {
           </div>
         </Card>
       </div>
-
-      <Card title="I tuoi piani alimentari" note={`${data.dietPlans.length} piani`}>
-        {data.dietPlans.length === 0 ? (
-          <Empty icon="📋" text="Nessun piano ancora. Creane uno e assegnalo ai giorni della settimana."
-            action={<button className="btn btn--sm" onClick={() => setEditing(newPlan())}>+ Crea il primo piano</button>} />
-        ) : (
-          <div className="grid grid--auto">
-            {data.dietPlans.map(p => (
-              <div key={p.id} className="card" style={{ background: 'var(--surface-2)' }}>
-                <div className="row">
-                  <b>{p.name}</b>
-                  <div className="spacer" />
-                  <span className="badge num">{nf.format(planKcal(p))} kcal</span>
-                </div>
-                <div className="small muted" style={{ margin: '6px 0 10px' }}>
-                  {p.meals.length} pasti · {sum(p.meals.map(m => m.items.length))} alimenti
-                </div>
-                <div className="row row--tight">
-                  <button className="btn btn--sm" onClick={() => setEditing(p)}>Modifica</button>
-                  <button className="btn btn--sm btn--ghost" onClick={() => setEditing({
-                    ...p, id: uid('dp'), name: `${p.name} (copia)`,
-                    meals: p.meals.map(m => ({ ...m, id: uid('m'), items: m.items.map(i => ({ ...i, id: uid('f') })) })),
-                  })}>Duplica</button>
-                  <div className="spacer" />
-                  <button className="btn btn--sm btn--ghost btn--danger" onClick={() => {
-                    if (confirm(`Eliminare "${p.name}"?`)) removeDietPlan(p.id)
-                  }}>✕</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {editing && <PlanEditor plan={editing} onClose={() => setEditing(null)} />}
     </>
   )
 }
 
-function newPlan(): DietPlan {
-  return {
-    id: uid('dp'),
-    name: 'Nuovo piano',
-    meals: [
-      { id: uid('m'), name: 'Colazione', time: '08:00', items: [] },
-      { id: uid('m'), name: 'Pranzo', time: '13:00', items: [] },
-      { id: uid('m'), name: 'Cena', time: '20:00', items: [] },
-    ],
-  }
-}
+/* ====================== Editor della dieta settimanale ==================== */
 
-/* ---------------------------- Editor del piano -------------------------- */
+function WeekDietEditor({ day, onDay }: { day: number; onDay: (d: number) => void }) {
+  const dietWeek = useStore(s => s.data.dietWeek)
+  const setDietMeals = useStore(s => s.setDietMeals)
+  const setDietNote = useStore(s => s.setDietNote)
+  const copyDietDay = useStore(s => s.copyDietDay)
+  const clearDietDay = useStore(s => s.clearDietDay)
 
-function PlanEditor({ plan, onClose }: { plan: DietPlan; onClose: () => void }) {
-  const save = useStore(s => s.saveDietPlan)
-  const [draft, setDraft] = useState<DietPlan>(plan)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [targets, setTargets] = useState<number[]>([])
+
+  const current = dietWeek[day] ?? { meals: [] }
+  const meals = current.meals
+  const oggi = weekday(today())
 
   const patchMeal = (id: string, patch: Partial<Meal>) =>
-    setDraft(d => ({ ...d, meals: d.meals.map(m => m.id === id ? { ...m, ...patch } : m) }))
+    setDietMeals(day, meals.map(m => m.id === id ? { ...m, ...patch } : m))
 
-  const total = planKcal(draft)
+  function addMeal() {
+    const preset = ['Colazione', 'Pranzo', 'Cena', 'Spuntino']
+    const name = preset[meals.length] ?? 'Spuntino'
+    setDietMeals(day, [...meals, { id: uid('m'), name, items: [] }])
+  }
 
   return (
-    <Modal open wide title="Piano alimentare" onClose={onClose}
-      footer={
-        <>
-          <button className="btn btn--ghost" onClick={onClose}>Annulla</button>
-          <button className="btn btn--primary" onClick={() => { save(draft); onClose() }}>Salva piano</button>
-        </>
-      }>
-      <div className="row">
-        <Field label="Nome" style={{ flex: '1 1 220px' }}>
-          <input className="input" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
-        </Field>
-        <div style={{ textAlign: 'right' }}>
-          <div className="field__label">Totale</div>
-          <div style={{ fontSize: 22, fontWeight: 700 }} className="num">{nf.format(total)} kcal</div>
-        </div>
+    <Card
+      title="La tua dieta settimanale"
+      note="si salva da sola · vale per tutte le settimane"
+      accent={ACCENT}
+    >
+      {/* selettore dei giorni, con le kcal già visibili */}
+      <div className="daytabs">
+        {DAY_NAMES.map((name, i) => {
+          const wd = i + 1
+          const k = dayKcal(dietWeek[wd])
+          return (
+            <button key={wd} className="daytab" aria-pressed={wd === day} onClick={() => onDay(wd)}>
+              <span className="daytab__name">{name}</span>
+              <span className="daytab__kcal num">{k ? nf.format(k) : '—'}</span>
+              {wd === oggi && <span className="daytab__today" aria-label="oggi" />}
+            </button>
+          )
+        })}
       </div>
 
-      {draft.meals.map(meal => (
-        <div key={meal.id} className="card" style={{ background: 'var(--surface-2)', padding: 12 }}>
-          <div className="row row--tight" style={{ marginBottom: 8 }}>
-            <input className="input input--sm" style={{ flex: '1 1 160px', fontWeight: 600 }}
-              value={meal.name} onChange={e => patchMeal(meal.id, { name: e.target.value })} />
-            <input className="input input--sm" type="time" style={{ width: 108 }}
-              value={meal.time ?? ''} onChange={e => patchMeal(meal.id, { time: e.target.value })} />
-            <span className="badge num">{nf.format(sum(meal.items.map(i => i.kcal)))} kcal</span>
-            <button className="btn btn--sm btn--ghost btn--danger" aria-label="Rimuovi pasto"
-              onClick={() => setDraft(d => ({ ...d, meals: d.meals.filter(m => m.id !== meal.id) }))}>✕</button>
+      <div className="row" style={{ margin: '14px 0 10px', alignItems: 'center' }}>
+        <h3 style={{ fontSize: 16 }}>{DAY_NAMES_LONG[day - 1]}</h3>
+        <span className="badge num">{nf.format(dayKcal(current))} kcal</span>
+        <div className="spacer" />
+        <button className="btn btn--sm" onClick={() => { setCopyOpen(o => !o); setTargets([]) }}>
+          ⧉ Copia su…
+        </button>
+        {meals.length > 0 && (
+          <button className="btn btn--sm btn--ghost btn--danger" onClick={() => {
+            if (confirm(`Svuotare ${DAY_NAMES_LONG[day - 1]}?`)) clearDietDay(day)
+          }}>Svuota</button>
+        )}
+      </div>
+
+      {copyOpen && (
+        <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 12 }}>
+          <div className="row row--tight" style={{ marginBottom: 10 }}>
+            <span className="small dim">Copia {DAY_NAMES_LONG[day - 1]} su:</span>
+            <div className="spacer" />
+            <button className="btn btn--sm btn--ghost"
+              onClick={() => setTargets(DAY_NAMES.map((_, i) => i + 1).filter(w => w !== day))}>
+              Tutti gli altri
+            </button>
           </div>
-
-          {meal.items.map(item => (
-            <div className="row row--tight" key={item.id} style={{ marginBottom: 5 }}>
-              <input className="input input--sm" style={{ flex: '2 1 160px' }} placeholder="Alimento"
-                value={item.name}
-                onChange={e => patchMeal(meal.id, { items: meal.items.map(i => i.id === item.id ? { ...i, name: e.target.value } : i) })} />
-              <input className="input input--sm" style={{ flex: '1 1 90px' }} placeholder="Quantità"
-                value={item.qty ?? ''}
-                onChange={e => patchMeal(meal.id, { items: meal.items.map(i => i.id === item.id ? { ...i, qty: e.target.value } : i) })} />
-              <input className="input input--sm input--num" style={{ width: 92 }} type="number" min={0} placeholder="kcal"
-                value={item.kcal || ''}
-                onChange={e => patchMeal(meal.id, { items: meal.items.map(i => i.id === item.id ? { ...i, kcal: Number(e.target.value) || 0 } : i) })} />
-              <button className="btn btn--sm btn--ghost" aria-label="Rimuovi alimento"
-                onClick={() => patchMeal(meal.id, { items: meal.items.filter(i => i.id !== item.id) })}>✕</button>
-            </div>
-          ))}
-
-          <button className="btn btn--sm btn--ghost" style={{ marginTop: 4 }}
-            onClick={() => patchMeal(meal.id, { items: [...meal.items, { id: uid('f'), name: '', kcal: 0 }] })}>
-            + Alimento
-          </button>
+          <div className="chipbar">
+            {DAY_NAMES.map((name, i) => {
+              const wd = i + 1
+              if (wd === day) return null
+              return (
+                <button key={wd} className="chip" aria-pressed={targets.includes(wd)}
+                  onClick={() => setTargets(t => t.includes(wd) ? t.filter(x => x !== wd) : [...t, wd])}>
+                  {name}
+                </button>
+              )
+            })}
+          </div>
+          <div className="row row--end" style={{ marginTop: 12 }}>
+            <button className="btn btn--sm btn--ghost" onClick={() => setCopyOpen(false)}>Annulla</button>
+            <button className="btn btn--sm btn--accent" style={{ ['--accent' as string]: ACCENT }}
+              disabled={targets.length === 0}
+              onClick={() => { copyDietDay(day, targets); setCopyOpen(false); setTargets([]) }}>
+              Copia su {targets.length} giorni
+            </button>
+          </div>
         </div>
-      ))}
+      )}
 
-      <button className="btn btn--sm"
-        onClick={() => setDraft(d => ({ ...d, meals: [...d.meals, { id: uid('m'), name: 'Spuntino', items: [] }] }))}>
-        + Pasto
-      </button>
+      {meals.length === 0 && (
+        <Empty icon="🥗" text={`${DAY_NAMES_LONG[day - 1]} è vuoto. Aggiungi il primo pasto.`} />
+      )}
 
-      <Field label="Note">
-        <input className="input" value={draft.note ?? ''} onChange={e => setDraft({ ...draft, note: e.target.value })}
-          placeholder="Es. giorno di ricarica, allenamento pesante…" />
-      </Field>
-    </Modal>
+      <div className="stack" style={{ gap: 10 }}>
+        {meals.map(meal => (
+          <div key={meal.id} className="card" style={{ background: 'var(--surface-2)', padding: 12 }}>
+            <div className="row row--tight" style={{ marginBottom: 8 }}>
+              <input className="input input--sm" style={{ flex: '1 1 150px', fontWeight: 600 }}
+                value={meal.name} onChange={e => patchMeal(meal.id, { name: e.target.value })} />
+              <input className="input input--sm" type="time" style={{ width: 108 }}
+                value={meal.time ?? ''} onChange={e => patchMeal(meal.id, { time: e.target.value })} />
+              <span className="badge num">{nf.format(sum(meal.items.map(i => i.kcal)))} kcal</span>
+              <button className="btn btn--sm btn--ghost btn--danger" aria-label="Rimuovi pasto"
+                onClick={() => setDietMeals(day, meals.filter(m => m.id !== meal.id))}>✕</button>
+            </div>
+
+            {meal.items.map(item => (
+              <div className="row row--tight" key={item.id} style={{ marginBottom: 5 }}>
+                <input className="input input--sm" style={{ flex: '2 1 150px' }} placeholder="Alimento"
+                  value={item.name}
+                  onChange={e => patchMeal(meal.id, { items: meal.items.map(i => i.id === item.id ? { ...i, name: e.target.value } : i) })} />
+                <input className="input input--sm" style={{ flex: '1 1 90px' }} placeholder="Quantità"
+                  value={item.qty ?? ''}
+                  onChange={e => patchMeal(meal.id, { items: meal.items.map(i => i.id === item.id ? { ...i, qty: e.target.value } : i) })} />
+                <input className="input input--sm input--num" style={{ width: 92 }} type="number" min={0} placeholder="kcal"
+                  value={item.kcal || ''}
+                  onChange={e => patchMeal(meal.id, { items: meal.items.map(i => i.id === item.id ? { ...i, kcal: Number(e.target.value) || 0 } : i) })} />
+                <button className="btn btn--sm btn--ghost" aria-label="Rimuovi alimento"
+                  onClick={() => patchMeal(meal.id, { items: meal.items.filter(i => i.id !== item.id) })}>✕</button>
+              </div>
+            ))}
+
+            <button className="btn btn--sm btn--ghost" style={{ marginTop: 4 }}
+              onClick={() => patchMeal(meal.id, { items: [...meal.items, { id: uid('f'), name: '', kcal: 0 }] })}>
+              + Alimento
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="row" style={{ marginTop: 12 }}>
+        <button className="btn btn--sm btn--accent" style={{ ['--accent' as string]: ACCENT }} onClick={addMeal}>
+          + Pasto
+        </button>
+        <input className="input input--sm" style={{ flex: '1 1 200px' }} placeholder="Nota del giorno (facoltativa)"
+          value={current.note ?? ''} onChange={e => setDietNote(day, e.target.value)} />
+      </div>
+    </Card>
   )
 }

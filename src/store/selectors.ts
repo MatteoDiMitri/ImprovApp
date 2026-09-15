@@ -1,8 +1,8 @@
 import {
-  addDays, daysBetween, today, weekDays, weekStart, type ISODate,
+  addDays, daysBetween, today, weekDays, weekStart, weekday, type ISODate,
 } from '../lib/date'
 import { avg, clamp, sum } from '../lib/format'
-import { ADHERENCE, type AppData, type DietPlan, type SectionId } from './types'
+import { ADHERENCE, type AppData, type DietDay, type SectionId } from './types'
 
 /* ============================== XP & LIVELLO ============================== */
 
@@ -139,22 +139,31 @@ export function bestStreak(d: AppData, section: SectionId | 'any' = 'any'): numb
 
 /* ================================= DIETA ================================= */
 
-export function planKcal(plan: DietPlan | undefined): number {
-  if (!plan) return 0
-  return sum(plan.meals.flatMap(m => m.items.map(i => i.kcal)))
+export function dayKcal(day: DietDay | undefined): number {
+  if (!day) return 0
+  return sum(day.meals.flatMap(m => m.items.map(i => i.kcal)))
 }
 
-export function dietPlanById(d: AppData, id?: string): DietPlan | undefined {
-  return id ? d.dietPlans.find(p => p.id === id) : undefined
+/** I pasti previsti per una data, presi dalla dieta settimanale ricorrente. */
+export function dietForDate(d: AppData, date: ISODate): DietDay | undefined {
+  const day = d.dietWeek[weekday(date)]
+  return day && day.meals.length > 0 ? day : undefined
 }
 
-/** Kcal previste per un giorno: consuntivo se c'è, altrimenti il piano assegnato. */
+/** Kcal di un giorno: consuntivo se c'è, altrimenti quelle della dieta settimanale. */
 export function kcalForDay(d: AppData, date: ISODate): number | null {
   const log = d.dietLogs[date]
   if (log?.kcalActual != null) return log.kcalActual
-  const planId = d.weekPlans[weekStart(date)]?.days[date]?.dietPlanId
-  const plan = dietPlanById(d, planId)
-  return plan ? planKcal(plan) : null
+  const day = dietForDate(d, date)
+  return day ? dayKcal(day) : null
+}
+
+/** Kcal medie di una settimana di dieta: il "budget" che ti sei dato. */
+export function weeklyDietKcal(d: AppData): { total: number; perDay: number; daysSet: number } {
+  const days = [1, 2, 3, 4, 5, 6, 7].map(wd => d.dietWeek[wd])
+  const set = days.filter(x => x && x.meals.length > 0)
+  const total = sum(set.map(dayKcal))
+  return { total, perDay: set.length ? total / set.length : 0, daysSet: set.length }
 }
 
 /** Percentuale di aderenza media su un intervallo di giorni. */
@@ -236,8 +245,8 @@ export function weekProgress(d: AppData, monday: ISODate): SectionProgress[] {
   const elapsed = days.filter(x => x <= now)
   const plan = d.weekPlans[monday]
 
-  // dieta: giorni con piano assegnato (o giorni trascorsi) valutati
-  const dietTarget = days.filter(x => plan?.days[x]?.dietPlanId).length || elapsed.length || 7
+  // dieta: i giorni per cui la dieta settimanale prevede qualcosa
+  const dietTarget = days.filter(x => dietForDate(d, x)).length || elapsed.length || 7
   const dietDone = sum(days.map(x => {
     const a = d.dietLogs[x]?.adherence
     return a ? ADHERENCE[a].score : 0
@@ -288,4 +297,12 @@ export function recentWeeks(n: number, from: ISODate = today()): ISODate[] {
 /** Gli ultimi `n` giorni fino a oggi compreso. */
 export function recentDays(n: number, from: ISODate = today()): ISODate[] {
   return Array.from({ length: n }, (_, i) => addDays(from, -(n - 1 - i)))
+}
+
+
+/* ================================ POMODORO =============================== */
+
+export function pomodorosOn(d: AppData, dates: ISODate[]): number {
+  const set = new Set(dates)
+  return sum(d.studyLogs.filter(l => set.has(l.date)).map(l => l.pomodoros ?? 0))
 }

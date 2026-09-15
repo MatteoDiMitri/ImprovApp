@@ -18,13 +18,19 @@ export interface Meal {
   items: FoodItem[]
 }
 
-/** Template di piano alimentare, riusabile nei giorni della settimana. */
-export interface DietPlan {
-  id: string
-  name: string
-  note?: string
+/**
+ * La dieta settimanale: per ogni giorno della settimana (1 = lunedì … 7 = domenica)
+ * i pasti previsti. È un modello ricorrente — la scrivi una volta e vale per tutte
+ * le settimane, esattamente come l'orario delle lezioni.
+ */
+export interface DietDay {
   meals: Meal[]
+  note?: string
 }
+
+export type DietWeek = Record<number, DietDay>
+
+export const emptyDietDay = (): DietDay => ({ meals: [] })
 
 /** Quanto bene ho seguito il piano in un dato giorno. */
 export type Adherence = 'perfetto' | 'bene' | 'cosi-cosi' | 'saltato'
@@ -106,6 +112,28 @@ export interface StudyLog {
   courseId?: string
   minutes: number
   topic?: string
+  /** quanti pomodori completi ha prodotto questa sessione */
+  pomodoros?: number
+  /** 'pomodoro' = tempo misurato dal timer; assente = voce storica importata */
+  source?: 'pomodoro'
+}
+
+export type PomodoroPhase = 'focus' | 'pausa'
+
+/** Tecnica pomodoro classica: un blocco di focus, poi una pausa. Di default 50 / 10. */
+export interface PomodoroConfig {
+  focusMin: number
+  breakMin: number
+}
+
+/** Una sessione in corso. Vive nello stato persistito, così un refresh non la perde. */
+export interface PomodoroSession {
+  phase: PomodoroPhase
+  /** timestamp epoch: il conteggio è sull'orologio reale, non su tick accumulati */
+  startedAt: number
+  endsAt: number
+  courseId?: string
+  topic?: string
 }
 
 export interface StudyGoals {
@@ -140,7 +168,6 @@ export interface StudyBlock {
 }
 
 export interface DayPlan {
-  dietPlanId?: string
   workoutDayId?: string     // id di uno SplitDay, oppure 'riposo'
   workoutDone?: boolean
   studyTargetMin?: number
@@ -173,7 +200,7 @@ export interface AppData {
   version: number
   profile: Profile
   settings: Settings
-  dietPlans: DietPlan[]
+  dietWeek: DietWeek
   dietLogs: Record<ISODate, DietLog>
   weights: WeightEntry[]
   splitDays: SplitDay[]
@@ -182,6 +209,9 @@ export interface AppData {
   lectures: Lecture[]
   studyLogs: StudyLog[]
   studyGoals: StudyGoals
+  pomodoro: PomodoroConfig
+  pomodoroSession?: PomodoroSession
+  pomodoroRound: number
   tasks: Task[]
   weekPlans: Record<ISODate, WeekPlan>
 }

@@ -7,7 +7,7 @@ import type { Route } from '../lib/router'
 import { useStore } from '../store/store'
 import { ADHERENCE, SECTIONS, type SectionId } from '../store/types'
 import {
-  activeDates, bestStreak, dietPlanById, levelInfo, planKcal, recentWeeks,
+  activeDates, bestStreak, dayKcal, dietForDate, levelInfo, pomodorosOn, recentWeeks,
   streak, studyMinutes, totalXp, totalXpForDay, weekProgress, weightTrend, xpForDay,
 } from '../store/selectors'
 import { Bar, Card, Empty, Stat } from '../components/ui/ui'
@@ -18,7 +18,7 @@ import { compact } from '../components/charts/chart-utils'
 
 const color = (id: SectionId) => SECTIONS.find(s => s.id === id)!.color
 
-export function Dashboard({ go }: { go: (r: Route) => void }) {
+export function Stats({ go }: { go: (r: Route) => void }) {
   const data = useStore(s => s.data)
 
   const now = today()
@@ -31,7 +31,8 @@ export function Dashboard({ go }: { go: (r: Route) => void }) {
   const weekPct = progress.reduce((a, p) => a + p.progress, 0) / progress.length
 
   const dates = activeDates(data)
-  const isEmpty = dates.length === 0 && data.dietPlans.length === 0 && data.splitDays.length === 0 && data.tasks.length === 0
+  const dietSet = [1, 2, 3, 4, 5, 6, 7].some(wd => (data.dietWeek[wd]?.meals.length ?? 0) > 0)
+  const isEmpty = dates.length === 0 && !dietSet && data.splitDays.length === 0 && data.tasks.length === 0
 
   // XP per giorno per la heatmap
   const heat: Record<string, number> = {}
@@ -53,7 +54,7 @@ export function Dashboard({ go }: { go: (r: Route) => void }) {
   const prevW = trend.length > 7 ? trend[trend.length - 8] : trend[0]
 
   const todayPlan = data.weekPlans[monday]?.days[now]
-  const dietPlan = dietPlanById(data, todayPlan?.dietPlanId)
+  const diet = dietForDate(data, now)
   const split = data.splitDays.find(s => s.id === todayPlan?.workoutDayId)
   const workoutDone = data.workoutLogs.some(l => l.date === now)
   const studyTarget = todayPlan?.studyTargetMin
@@ -69,10 +70,10 @@ export function Dashboard({ go }: { go: (r: Route) => void }) {
     <>
       <header className="main__head">
         <div className="grow">
-          <h1>Ciao{data.profile.name ? `, ${data.profile.name}` : ''} 👾</h1>
+          <h1>📈 Statistiche</h1>
           <p className="main__sub">{formatDay(now)} · settimana {isoWeekNumber(now)} ({formatWeekRange(monday)})</p>
         </div>
-        <button className="btn btn--primary" onClick={() => go('settimana')}>Apri la settimana →</button>
+        <button className="btn btn--primary" onClick={() => go('settimana')}>← Torna alla settimana</button>
       </header>
 
       {/* ------------------------------- HUD ------------------------------ */}
@@ -141,8 +142,8 @@ export function Dashboard({ go }: { go: (r: Route) => void }) {
 
           <QuestRow
             section="dieta"
-            title={dietPlan ? dietPlan.name : 'Nessun piano assegnato'}
-            meta={dietPlan ? `${nf.format(planKcal(dietPlan))} kcal` : '—'}
+            title={diet ? `${diet.meals.length} pasti in programma` : 'Dieta non compilata'}
+            meta={diet ? `${nf.format(dayKcal(diet))} kcal` : '—'}
             state={adherenceToday ? ADHERENCE[adherenceToday].label : undefined}
             stateTone={adherenceToday ? ADHERENCE[adherenceToday].tone : undefined}
             progress={adherenceToday ? ADHERENCE[adherenceToday].score : 0}
@@ -218,7 +219,7 @@ export function Dashboard({ go }: { go: (r: Route) => void }) {
         </Card>
         <Card accent={color('studio')}>
           <Stat label="Studio settimana" value={formatMinutes(studyMinutes(data, week))}
-            hint={`obiettivo ${formatMinutes(data.studyGoals.weeklyMinutes)}`} />
+            hint={`${pomodorosOn(data, week)} 🍅 · obiettivo ${formatMinutes(data.studyGoals.weeklyMinutes)}`} />
           <div style={{ marginTop: 8 }}>
             <Bar value={studyMinutes(data, week) / data.studyGoals.weeklyMinutes} color={color('studio')} />
           </div>
@@ -275,10 +276,10 @@ function Onboarding({ go }: { go: (r: Route) => void }) {
         <Empty icon="🎮" text="Non c'è ancora niente da mostrare: costruisci le fondamenta e i grafici si riempiranno da soli." />
         <div className="grid grid--2" style={{ marginTop: 8 }}>
           {[
-            { r: 'dieta' as Route, t: '1. Crea un piano alimentare', d: 'Pasti e kcal, una volta sola. Poi lo assegni ai giorni.' },
+            { r: 'dieta' as Route, t: '1. Scrivi la dieta settimanale', d: 'I pasti di ogni giorno, una volta sola: finiscono da soli nella settimana.' },
             { r: 'workout' as Route, t: '2. Inserisci il tuo split', d: 'Push, Pull, Gambe… con esercizi, carichi e kcal stimate.' },
-            { r: 'studio' as Route, t: '3. Metti l\'orario delle lezioni', d: 'Corsi e lezioni ricorrenti, più gli obiettivi di studio.' },
-            { r: 'settimana' as Route, t: '4. Pianifica la settimana', d: 'Assegna tutto ai sette giorni e poi limitati a eseguire.' },
+            { r: 'studio' as Route, t: '3. Corsi, lezioni e pomodoro', d: 'L\'orario universitario e il timer con cui conti le ore di studio.' },
+            { r: 'settimana' as Route, t: '4. Pianifica la settimana', d: 'Allenamenti, obiettivi e task sui sette giorni. Poi limitati a eseguire.' },
           ].map(x => (
             <div key={x.r} className="card" style={{ background: 'var(--surface-2)' }}>
               <b>{x.t}</b>
